@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.ably.lib.realtime.AblyRealtime
 import io.ably.lib.realtime.Channel
@@ -34,6 +35,7 @@ class SyncService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+        Log.d("CrossClip", "System OnPrimaryClipChangedListener triggered! Launching trampoline...")
         launchFocusTrampoline()
     }
 
@@ -45,6 +47,7 @@ class SyncService : Service() {
 
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.addPrimaryClipChangedListener(clipListener)
+        Log.d("CrossClip", "SyncService onCreate completed, listener attached.")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -68,8 +71,9 @@ class SyncService : Service() {
                 channel?.subscribe("clip_sync") { message: Message ->
                     onRemoteMessage(message.data.toString())
                 }
+                Log.d("CrossClip", "Ably connected and subscribed on Android!")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("CrossClip", "Ably init error", e)
             }
         }.start()
     }
@@ -87,13 +91,14 @@ class SyncService : Service() {
                 lastKnownHash = incomingHash
                 val key = secretKey ?: return
                 val plainText = CryptoUtil.decrypt(payload, key)
+                Log.d("CrossClip", "Received remote clip from PC: ${plainText.take(20)}...")
 
                 mainHandler.post {
                     writeToSystemClipboard(plainText)
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("CrossClip", "Error processing remote message", e)
         }
     }
 
@@ -102,14 +107,18 @@ class SyncService : Service() {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val clip = ClipData.newPlainText("CrossClip", text)
             clipboard.setPrimaryClip(clip)
+            Log.d("CrossClip", "Silently wrote to Android clipboard container!")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("CrossClip", "Failed writing to Android clipboard", e)
         }
     }
 
     fun sendLocalClip(text: String) {
         val h = CryptoUtil.sha256(text)
-        if (h == lastKnownHash) return
+        if (h == lastKnownHash) {
+            Log.d("CrossClip", "Skipping sendLocalClip: hash matches lastKnownHash")
+            return
+        }
         lastKnownHash = h
 
         val key = secretKey ?: return
@@ -122,8 +131,9 @@ class SyncService : Service() {
                     put("payload", encrypted)
                 }
                 channel?.publish("clip_sync", json.toString())
+                Log.d("CrossClip", "Published local Android clip to Ably! Hash: ${h.take(8)}")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("CrossClip", "Error publishing local clip", e)
             }
         }.start()
     }

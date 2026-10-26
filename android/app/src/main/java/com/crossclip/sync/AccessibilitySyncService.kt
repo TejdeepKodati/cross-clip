@@ -1,6 +1,8 @@
 package com.crossclip.sync
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -24,6 +26,7 @@ class AccessibilitySyncService : AccessibilityService() {
                         val sel = full.substring(s, e)
                         if (sel.isNotBlank()) {
                             lastSelectedText = sel
+                            Log.d("CrossClip", "Accessibility tracked selection: ${sel.take(15)}...")
                         }
                     }
                     source.recycle()
@@ -39,11 +42,27 @@ class AccessibilitySyncService : AccessibilityService() {
                         desc.equals("Copy", ignoreCase = true) ||
                         res.endsWith(":id/copy")
 
-                if (isCopy && !lastSelectedText.isNullOrEmpty()) {
-                    SyncService.instance?.sendLocalClip(lastSelectedText!!)
+                if (isCopy) {
+                    Log.d("CrossClip", "Copy button tapped! Selection available: ${!lastSelectedText.isNullOrEmpty()}")
+                    if (!lastSelectedText.isNullOrEmpty()) {
+                        SyncService.instance?.sendLocalClip(lastSelectedText!!)
+                    }
+                    // Also trigger the focus trampoline as reinforcement
+                    launchTrampoline()
                 }
             }
         }
+    }
+
+    private fun launchTrampoline() {
+        val intent = Intent(this, TransparentActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
+            )
+        }
+        startActivity(intent)
     }
 
     override fun onInterrupt() {}
