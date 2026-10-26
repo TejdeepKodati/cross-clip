@@ -24,17 +24,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Isolated, transient focus activity with no task affinity -->
-        <activity
-            android:name=".TransparentActivity"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:taskAffinity=""
-            android:launchMode="singleInstance"
-            android:exported="false"
-            android:configChanges="orientation|screenSize|screenLayout" />
-
         <service
             android:name=".SyncService"
             android:enabled="true"

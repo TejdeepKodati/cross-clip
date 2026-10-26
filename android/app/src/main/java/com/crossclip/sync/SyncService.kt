@@ -5,11 +5,14 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.View
+import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import io.ably.lib.realtime.AblyRealtime
 import io.ably.lib.realtime.Channel
@@ -38,8 +41,10 @@ class SyncService : Service() {
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         if (!isPaused) {
-            Log.d("CrossClip", "Primary clip changed, launching transient trampoline...")
-            launchFocusTrampoline()
+            Log.d("CrossClip", "Primary clip changed! Triggering silent window capture...")
+            mainHandler.post {
+                captureClipboardViaOverlay()
+            }
         }
     }
 
@@ -51,6 +56,7 @@ class SyncService : Service() {
 
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.addPrimaryClipChangedListener(clipListener)
+        Log.d("CrossClip", "SyncService onCreate completed and listener attached.")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -124,6 +130,64 @@ class SyncService : Service() {
         }
     }
 
+    private fun captureClipboardViaOverlay() {
+        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val dummyView = View(this)
+
+        val params = WindowManager.LayoutParams(
+            1, 1,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        )
+
+        var removed = false
+        fun safeRemove() {
+            if (!removed) {
+                removed = true
+                try {
+                    wm.removeView(dummyView)
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+        }
+
+        dummyView.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
+            if (hasFocus) {
+                try {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    if (clipboard.hasPrimaryClip()) {
+                        val clip = clipboard.primaryClip
+                        if (clip != null && clip.itemCount > 0) {
+                            val text = clip.getItemAt(0).coerceToText(this).toString()
+                            Log.d("CrossClip", "Captured clip via overlay focus: ${text.take(20)}...")
+                            if (text.isNotBlank()) {
+                                sendLocalClip(text)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("CrossClip", "Error reading clip during overlay focus", e)
+                } finally {
+                    safeRemove()
+                }
+            }
+        }
+
+        try {
+            wm.addView(dummyView, params)
+            // Safety timeout: remove view after 250ms
+            mainHandler.postDelayed({ safeRemove() }, 250)
+        } catch (e: Exception) {
+            Log.e("CrossClip", "Error adding overlay window", e)
+        }
+    }
+
     fun sendLocalClip(text: String) {
         if (isPaused) return
         val h = CryptoUtil.sha256(text)
@@ -145,17 +209,6 @@ class SyncService : Service() {
                 Log.e("CrossClip", "Error sending clip", e)
             }
         }.start()
-    }
-
-    private fun launchFocusTrampoline() {
-        val intent = Intent(this, TransparentActivity::class.java).apply {
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                Intent.FLAG_ACTIVITY_NO_ANIMATION
-            )
-        }
-        startActivity(intent)
     }
 
     private fun createSilentChannel() {
