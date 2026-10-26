@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.gradle/
+build/
+*.apk
+local.properties
+.idea/
+*.iml

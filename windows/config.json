@@ -1,0 +1,5 @@
+{
+  "server_url": "wss://YOUR-GLITCH-PROJECT.glitch.me",
+  "pairing_token": "cross-clip-secret-token-change-me",
+  "device_id": "windows_pc"
+}

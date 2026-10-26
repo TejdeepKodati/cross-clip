@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">CrossClip</string>
+    <string name="accessibility_service_desc">Enables seamless background clipboard synchronization with your PC.</string>
+</resources>
