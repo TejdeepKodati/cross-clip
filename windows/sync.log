@@ -1,0 +1,24 @@
+2026-10-26 20:07:27 [INFO] Starting CrossClip Windows Client...
+2026-10-26 20:08:08 [INFO] Starting CrossClip Windows Client...
+2026-10-26 20:08:08 [INFO] Win32 clipboard listener registered successfully.
+2026-10-26 20:08:08 [INFO] RealtimeChannel.subscribe called, channel = cross-clip-sync, event = None
+2026-10-26 20:08:08 [INFO] RealtimeChannel.attach() called, channel = cross-clip-sync
+2026-10-26 20:08:08 [INFO] connect(): attempting to connect to wss://main.realtime.ably.net?key=ca7YEA.YRpXLw%3ACnnU8B8-VhcmBWb30ljl4uXWVEaxu6OLu8sNglwAW80&v=5&format=msgpack
+2026-10-26 20:08:08 [INFO] ws_connect(): connection established to wss://main.realtime.ably.net?key=ca7YEA.YRpXLw%3ACnnU8B8-VhcmBWb30ljl4uXWVEaxu6OLu8sNglwAW80&v=5&format=msgpack
+2026-10-26 20:08:08 [INFO] Connection state changing from ConnectionState.CONNECTING to ConnectionState.CONNECTED
+2026-10-26 20:08:08 [INFO] ConnectionManager.send_queued_messages(): sending 0 message(s)
+2026-10-26 20:08:08 [INFO] WebSocketTransport.send(): sending msgpack message (length: 41 bytes)
+2026-10-26 20:08:09 [INFO] RealtimePresence.on_attached(): channel = cross-clip-sync, hasPresence = False
+2026-10-26 20:08:09 [INFO] Connected to Ably cloud relay!
+2026-10-26 20:09:02 [INFO] Received remote sync message from android_phone: 12 chars
+2026-10-26 20:09:02 [INFO] Updated Windows clipboard with remote text (12 chars, Hash: 99043d18)
+2026-10-26 20:09:02 [INFO] Received remote sync message from android_phone: 13 chars
+2026-10-26 20:09:02 [INFO] Updated Windows clipboard with remote text (13 chars, Hash: f1052cac)
+2026-10-26 20:13:16 [INFO] Received remote sync message from android_phone: 12 chars
+2026-10-26 20:13:16 [INFO] Updated Windows clipboard with remote text (12 chars, Hash: 99043d18)
+2026-10-26 20:13:16 [INFO] Received remote sync message from android_phone: 13 chars
+2026-10-26 20:13:16 [INFO] Updated Windows clipboard with remote text (13 chars, Hash: 623ed27f)
+2026-10-26 20:21:45 [INFO] Received remote sync message from android_phone: 7 chars
+2026-10-26 20:21:45 [INFO] Updated Windows clipboard with remote text (7 chars, Hash: 9c6725dc)
+2026-10-26 20:21:45 [INFO] Received remote sync message from android_phone: 13 chars
+2026-10-26 20:21:45 [INFO] Updated Windows clipboard with remote text (13 chars, Hash: 6a380f69)

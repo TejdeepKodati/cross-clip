@@ -22,21 +22,25 @@ class SyncService : Service() {
 
     companion object {
         var instance: SyncService? = null
-        const val CHANNEL_ID = "cross_clip_silent_channel"
+        const val CHANNEL_ID = "cross_clip_service_channel"
         const val NOTIF_ID = 4040
         const val ABLY_CHANNEL_NAME = "cross-clip-sync"
         const val DEVICE_ID = "android_phone"
+        const val ACTION_TOGGLE_PAUSE = "com.crossclip.sync.ACTION_TOGGLE_PAUSE"
     }
 
     private var ably: AblyRealtime? = null
     private var channel: Channel? = null
     private var lastKnownHash = ""
     private var secretKey: SecretKeySpec? = null
+    private var isPaused = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        Log.d("CrossClip", "System OnPrimaryClipChangedListener triggered! Launching trampoline...")
-        launchFocusTrampoline()
+        if (!isPaused) {
+            Log.d("CrossClip", "Primary clip changed, launching transient trampoline...")
+            launchFocusTrampoline()
+        }
     }
 
     override fun onCreate() {
@@ -47,10 +51,17 @@ class SyncService : Service() {
 
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.addPrimaryClipChangedListener(clipListener)
-        Log.d("CrossClip", "SyncService onCreate completed, listener attached.")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TOGGLE_PAUSE) {
+            isPaused = !isPaused
+            val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notifManager.notify(NOTIF_ID, buildNotification())
+            Log.d("CrossClip", "Sync paused state changed to: $isPaused")
+            return START_STICKY
+        }
+
         val apiKey = intent?.getStringExtra("API_KEY") ?: "ca7YEA.YRpXLw:CnnU8B8-VhcmBWb30ljl4uXWVEaxu6OLu8sNglwAW80"
         initAbly(apiKey)
         return START_STICKY
@@ -71,14 +82,15 @@ class SyncService : Service() {
                 channel?.subscribe("clip_sync") { message: Message ->
                     onRemoteMessage(message.data.toString())
                 }
-                Log.d("CrossClip", "Ably connected and subscribed on Android!")
+                Log.d("CrossClip", "Connected and subscribed to Ably!")
             } catch (e: Exception) {
-                Log.e("CrossClip", "Ably init error", e)
+                Log.e("CrossClip", "Ably connection failed", e)
             }
         }.start()
     }
 
     private fun onRemoteMessage(rawJson: String) {
+        if (isPaused) return
         try {
             val json = JSONObject(rawJson)
             val sender = json.optString("sender")
@@ -91,14 +103,13 @@ class SyncService : Service() {
                 lastKnownHash = incomingHash
                 val key = secretKey ?: return
                 val plainText = CryptoUtil.decrypt(payload, key)
-                Log.d("CrossClip", "Received remote clip from PC: ${plainText.take(20)}...")
 
                 mainHandler.post {
                     writeToSystemClipboard(plainText)
                 }
             }
         } catch (e: Exception) {
-            Log.e("CrossClip", "Error processing remote message", e)
+            Log.e("CrossClip", "Error in onRemoteMessage", e)
         }
     }
 
@@ -107,18 +118,16 @@ class SyncService : Service() {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val clip = ClipData.newPlainText("CrossClip", text)
             clipboard.setPrimaryClip(clip)
-            Log.d("CrossClip", "Silently wrote to Android clipboard container!")
+            Log.d("CrossClip", "Updated phone clipboard with remote text (${text.take(15)}...)")
         } catch (e: Exception) {
-            Log.e("CrossClip", "Failed writing to Android clipboard", e)
+            Log.e("CrossClip", "Error setting phone clipboard", e)
         }
     }
 
     fun sendLocalClip(text: String) {
+        if (isPaused) return
         val h = CryptoUtil.sha256(text)
-        if (h == lastKnownHash) {
-            Log.d("CrossClip", "Skipping sendLocalClip: hash matches lastKnownHash")
-            return
-        }
+        if (h == lastKnownHash) return
         lastKnownHash = h
 
         val key = secretKey ?: return
@@ -131,9 +140,9 @@ class SyncService : Service() {
                     put("payload", encrypted)
                 }
                 channel?.publish("clip_sync", json.toString())
-                Log.d("CrossClip", "Published local Android clip to Ably! Hash: ${h.take(8)}")
+                Log.d("CrossClip", "Published phone clipboard to PC! Hash: ${h.take(8)}")
             } catch (e: Exception) {
-                Log.e("CrossClip", "Error publishing local clip", e)
+                Log.e("CrossClip", "Error sending clip", e)
             }
         }.start()
     }
@@ -142,8 +151,8 @@ class SyncService : Service() {
         val intent = Intent(this, TransparentActivity::class.java).apply {
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_NO_ANIMATION or
-                Intent.FLAG_ACTIVITY_CLEAR_TOP
+                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION
             )
         }
         startActivity(intent)
@@ -165,12 +174,24 @@ class SyncService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        val toggleIntent = Intent(this, SyncService::class.java).apply {
+            action = ACTION_TOGGLE_PAUSE
+        }
+        val pToggle = PendingIntent.getService(
+            this, 0, toggleIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val statusText = if (isPaused) "Sync is PAUSED (Tap to Resume)" else "Sync is ACTIVE (Tap to Pause)"
+        val actionTitle = if (isPaused) "▶ Resume" else "⏸ Pause"
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("CrossClip Active")
-            .setContentText("Connected to cloud relay")
+            .setContentTitle("CrossClip")
+            .setContentText(statusText)
             .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
+            .addAction(android.R.drawable.ic_media_pause, actionTitle, pToggle)
             .build()
     }
 

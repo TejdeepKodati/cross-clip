@@ -7,7 +7,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.READ_LOGS" />
 
     <application
         android:allowBackup="true"
@@ -25,34 +24,22 @@
             </intent-filter>
         </activity>
 
-        <!-- Zero-UI Transparent Focus Activity -->
+        <!-- Isolated, transient focus activity with no task affinity -->
         <activity
             android:name=".TransparentActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:excludeFromRecents="true"
             android:noHistory="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout" />
 
-        <!-- Background Persistent Sync Service -->
         <service
             android:name=".SyncService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-
-        <!-- Optional Accessibility Fallback -->
-        <service
-            android:name=".AccessibilitySyncService"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
 
     </application>
 </manifest>
