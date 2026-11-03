@@ -68,8 +68,11 @@ if not exist "%APK_FILE%" (
 )
 
 if exist "%APK_FILE%" (
+    echo Disabling ADB package verifier check...
+    "%ADB_CMD%" shell settings put global verifier_verify_adb_installs 0 >nul 2>nul
+    "%ADB_CMD%" shell settings put global package_verifier_enable 0 >nul 2>nul
     echo Installing %APK_FILE% to phone...
-    "%ADB_CMD%" install -r "%APK_FILE%"
+    "%ADB_CMD%" install -r -d "%APK_FILE%"
     if %ERRORLEVEL% NEQ 0 (
         echo [WARNING] APK install returned an error. If prompted on your phone, tap "Install".
     ) else (
