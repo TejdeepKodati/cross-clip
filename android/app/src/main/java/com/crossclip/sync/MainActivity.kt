@@ -42,7 +42,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadSettings() {
         val prefs = getSharedPreferences(SyncService.PREFS_NAME, Context.MODE_PRIVATE)
-        binding.etServerUrl.setText(prefs.getString(SyncService.KEY_SERVER_URL, "https://cross-clip-relay.workers.dev"))
+        binding.etServerUrl.setText(prefs.getString(SyncService.KEY_SERVER_URL, "https://cross-clip-relay.tejdeepkodati996.workers.dev"))
         binding.etPairingCode.setText(prefs.getString(SyncService.KEY_SECRET, ""))
         binding.switchNotifications.isChecked = prefs.getBoolean(SyncService.KEY_NOTIFS, false)
     }

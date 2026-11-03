@@ -7,7 +7,7 @@ namespace CrossClip
 {
     public class AppSettings
     {
-        public string ServerUrl { get; set; } = "https://cross-clip-relay.workers.dev";
+        public string ServerUrl { get; set; } = "https://cross-clip-relay.tejdeepkodati996.workers.dev";
         public string MasterSecret { get; set; } = string.Empty;
         public bool ShowNotifications { get; set; } = false;
         public bool StartWithWindows { get; set; } = false;
