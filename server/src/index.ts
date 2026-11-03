@@ -102,15 +102,11 @@ export class ClipboardRoom extends DurableObject {
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
-    try {
-      ws.close(code, "Durable Object closing connection");
-    } catch {}
+    // Hibernation event callback - connection is already closing/closed.
   }
 
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
-    try {
-      ws.close(1011, "WebSocket error");
-    } catch {}
+    // Hibernation error callback.
   }
 }
 

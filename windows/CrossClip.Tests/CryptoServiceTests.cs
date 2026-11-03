@@ -67,6 +67,14 @@ namespace CrossClip.Tests
         }
 
         [Fact]
+        public void CheckSampleRoomId()
+        {
+            byte[] secret = CryptoService.DecodeBase32("33REWYNRZIPJTZOSLFFU44XUOKH5YLDXM5GZYJL5EOVUP6LHSQZA");
+            var (roomId, _) = CryptoService.DeriveKeys(secret);
+            Assert.Equal("cba59b21034bf23e4b781877f52b3531", roomId);
+        }
+
+        [Fact]
         public void DecryptClip_WithWrongKey_ThrowsOrFails()
         {
             byte[] secret1 = CryptoService.GenerateMasterSecret();
