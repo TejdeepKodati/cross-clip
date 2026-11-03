@@ -1,159 +1,198 @@
-# cross-clip 📋⚡
+# cross-clip
 
-Free, lightweight, zero-cost, end-to-end encrypted (E2EE) bidirectional clipboard synchronization between Android phones (optimized for Oppo / ColorOS) and Windows PCs over a cloud WebSocket relay.
+Lightweight, zero-cost, end-to-end encrypted (E2EE) bidirectional clipboard synchronization between Android devices and Windows PCs over a cloud WebSocket relay.
 
 ```
 +------------------+         End-to-End Encrypted         +------------------+
-|   Windows PC     | <----------------------------------> |  Android Phone   |
+|    Windows PC    | <----------------------------------> |  Android Device  |
 | (C# .NET 8 Tray) |          Cloudflare Worker           | (Kotlin Service) |
-+------------------+          + SQLite Durable            +------------------+
-                                   Object
++------------------+         + SQLite-backed DO           +------------------+
 ```
 
 ---
 
-## Key Features
-- **Rs 0 Total Cost**: Cloudflare Workers + SQLite-backed Durable Object on the 100% free plan (no credit/debit card required).
-- **True End-to-End Encryption**: 256-bit AES-GCM with HKDF-SHA256 key derivation. The cloud relay only sees opaque encrypted envelopes and room IDs—never your plaintext clips.
-- **Zero-Friction Workflow**:
-  - Copy on phone ➔ immediately paste with `Ctrl + V` on Windows.
-  - Copy on Windows (`Ctrl + C`) ➔ immediately paste with long-press on phone.
-- **ColorOS / Oppo K13 5G Optimized**: Bypasses Android 10+ background clipboard blocks using ADB-granted overlay rights + transparent zero-frame launch (<150ms).
-- **Zero Battery/Memory Drain**: Hidden background service on Android with `IMPORTANCE_MIN` silent notification. Windows runs purely as a tiny system tray icon with single-instance mutex.
-- **Echo-Loop Guard**: Cryptographic SHA-256 hash deduplication prevents infinite copy reflection loops.
-- **Bank-Safe & UPI Friendly**: One-tap notification pause toggle, Quick Settings tile, and an instant ADB `banking-mode.bat` switch.
+## Overview
+
+`cross-clip` enables seamless clipboard synchronization between Windows computers and Android mobile devices across arbitrary network configurations (including cellular networks behind CGNAT and separate Wi-Fi networks).
+
+- **Zero Cost**: Built entirely on free-tier infrastructure (Cloudflare Workers with SQLite Durable Objects) requiring no credit or debit card.
+- **End-to-End Encryption**: Clips are encrypted on the client device using AES-256-GCM. The encryption key never leaves the devices. The relay server processes only opaque ciphertexts and anonymous room identifiers.
+- **Minimal Footprint**:
+  - Windows: Single-instance system tray application with an idle memory footprint under 20 MB.
+  - Android: Background foreground service with a minimal-importance silent notification channel. No input method (IME) or accessibility service required.
+- **Bidirectional Overwrite**: The latest copied text automatically overwrites the destination clipboard.
+- **Loop Prevention**: Monotonically increasing timestamps and SHA-256 hash tracking prevent reflection loops.
+- **Financial App Safety**: Minimal permission footprint designed to avoid triggering security scanners in banking and UPI applications.
 
 ---
 
-## Architecture & Monorepo Layout
+## Repository Structure
+
 ```
 cross-clip/
-├── server/                 # Cloudflare Worker + SQLite Durable Object (TypeScript)
-│   ├── src/index.ts        # WebSocket Hibernation & DO relay
-│   └── wrangler.toml       # SQLite DO configuration (free tier)
-├── windows/                # Windows .NET 8 WinForms system tray application
-│   ├── CrossClip/          # Tray icon, Win32 AddClipboardFormatListener, AES-GCM
-│   └── CrossClip.Tests/    # Unit tests for HKDF, AES-GCM & EchoLoopGuard
-├── android/                # Native Android Kotlin application (minSdk 26)
-│   └── app/src/main/       # SyncService, ClipCaptureActivity, Quick Settings tile
+├── android/                 # Android client application (Kotlin, minSdk 26)
+│   └── app/src/main/        # Foreground service, capture activity, quick settings tile
+├── windows/                 # Windows client application (C# .NET 8 WinForms)
+│   ├── CrossClip/           # System tray app, Win32 clipboard listener, AES-GCM
+│   └── CrossClip.Tests/     # Unit tests for HKDF, AES-GCM, and echo guard
+├── server/                  # Cloud relay worker (TypeScript, Wrangler)
+│   ├── src/index.ts         # WebSocket hibernation and Durable Object relay
+│   └── wrangler.toml        # SQLite Durable Object configuration
 ├── docs/
-│   └── PROTOCOL.md         # Wire protocol and cryptographic specification
-├── setup-android.bat       # One-click ADB install and permission granter
-├── banking-mode.bat        # Instant bank-safe toggle
-└── .github/workflows/      # Automated CI: builds Windows exe & Android APK
+│   └── PROTOCOL.md          # Complete wire protocol and cryptographic specification
+├── .github/workflows/       # GitHub Actions CI for automated builds and testing
+├── setup-android.bat        # Automated ADB installation and permission configuration
+├── banking-mode.bat         # Toggle utility for banking-restricted environments
+└── LICENSE                  # MIT License
 ```
 
 ---
 
-## Setup for Beginners (Step-by-Step)
+## Cryptography and Protocol
 
-Follow these exact steps in order:
+The system implements a zero-knowledge trust model:
 
-### 1. Deploy the Cloud Relay (Free Cloudflare Worker)
-1. Open a command prompt in the `server` directory:
-   ```cmd
-   cd D:\cross-clip\server
+1. **Master Secret**: A 256-bit cryptographic secret generated using a CSPRNG on the Windows client, formatted in Base32 for human pairing.
+2. **Key Derivation (RFC 5869 HKDF-SHA256)**:
+   - `Room ID = Hex(HKDF-Expand(PRK, "cross-clip-room-id", 16))` (sent to relay).
+   - `AES Key = HKDF-Expand(PRK, "cross-clip-aes-key", 32)` (retained locally).
+3. **Authenticated Encryption (AES-256-GCM)**:
+   - 12-byte random initialization vector (IV) per payload.
+   - 16-byte authentication tag appended to ciphertext.
+   - 8-byte big-endian millisecond timestamp included as Additional Authenticated Data (AAD) to prevent replay attacks.
+
+For full technical specifications, packet formats, and state transitions, see [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- A Windows PC running Windows 10 (1809+) or Windows 11.
+- An Android device running Android 8.0 (API 26) or newer.
+- A free [Cloudflare account](https://dash.cloudflare.com/) (no payment card required).
+
+---
+
+### Step 1: Deploy the Cloud Relay
+
+The relay runs as a serverless Cloudflare Worker utilizing Durable Objects with WebSocket Hibernation.
+
+1. Install Node.js (v18+) if not already present.
+2. Navigate to the `server` directory and install dependencies:
+   ```bash
+   cd server
+   npm install
    ```
-2. Log in to your Cloudflare account (no payment card needed):
-   ```cmd
+3. Authenticate with Cloudflare:
+   ```bash
    npx wrangler login
    ```
-   A browser tab will automatically open. Click **Allow**.
-3. Deploy the worker:
-   ```cmd
+   A browser window will open. Authorize the login request.
+4. Deploy the worker:
+   ```bash
    npx wrangler deploy
    ```
-4. Note your deployed worker URL (e.g. `https://cross-clip-relay.<your-subdomain>.workers.dev`).
+5. Record your deployed Worker URL from the console output (for example: `https://cross-clip-relay.<subdomain>.workers.dev`).
 
 ---
 
-### 2. Run the Windows Tray Application
-1. The Windows application is already compiled as a standalone executable in `windows\publish\CrossClip.exe` (or downloaded from the GitHub Actions releases).
-2. Double-click `CrossClip.exe` to run.
-3. Look near your Windows clock in the system tray: you will see the green **cross-clip** icon.
-4. Double-click the tray icon to open **cross-clip Setup**:
-   - Paste your Cloudflare Server URL into the **Relay Server URL** field.
-   - You will see your unique **Pairing Code** and a generated **QR Code**. Keep this window open.
+### Step 2: Install and Configure the Windows Application
+
+1. Download `CrossClip.exe` from the latest GitHub Actions build artifact or build locally from source.
+2. Run `CrossClip.exe`. The application starts minimized in the system tray.
+3. Double-click the tray icon to open settings:
+   - Enter your Cloudflare Relay URL in the **Relay Server URL** field.
+   - Note your generated **Pairing Code** or keep the QR code visible.
+   - Ensure the connection status indicates **Connected**.
 
 ---
 
-### 3. Install & Configure on Oppo K13 5G (Android)
-Your phone is already connected via USB with USB debugging enabled.
+### Step 3: Install and Configure the Android Application
 
-1. Double-click `setup-android.bat` in `D:\cross-clip`.
-2. The script will:
-   - Check device connection (`adb devices`).
-   - Install `cross-clip.apk`.
-   - Automatically grant required ADB permissions:
-     * `SYSTEM_ALERT_WINDOW` (allows background clipboard capture)
-     * `android.permission.READ_LOGS`
-     * Battery optimization whitelist
-3. Complete these 3 ColorOS steps directly on your phone:
-   - **A. Auto-launch**: Open phone **Settings** ➔ **Apps** ➔ **App management** ➔ **cross-clip** ➔ Tap **Auto-launch** and switch it **ON**.
-   - **B. Background Activity**: In the same menu, tap **Battery usage** ➔ Turn **ON** "Allow background activity".
-   - **C. Lock in Recents**: Open **cross-clip** on your phone, swipe up to Recent Apps, tap the 3 dots (or lock icon) above cross-clip, and tap **Lock**.
-
----
-
-### 4. Pair Phone & PC
-1. On your phone, open the **cross-clip** app.
-2. Enter or paste your **Relay Server URL** and your **Pairing Code** (from Step 2).
-3. Tap **Save & Connect**.
-4. Both devices will display **Connected**!
-
----
-
-### 5. Test the Workflow
-1. **Phone ➔ PC**:
-   - On your phone, open any app (e.g. Chrome, Notes, WhatsApp) and copy any text.
-   - Switch to your PC and press `Ctrl + V` in Notepad. Your text appears instantly!
-2. **PC ➔ Phone**:
-   - On your PC, select any text and press `Ctrl + C`.
-   - On your phone, tap and hold any text box and tap **Paste**. The text pastes immediately!
+1. Enable **Developer options** and **USB debugging** on your Android device:
+   - Go to **Settings** > **About phone** > tap **Build number** 7 times.
+   - In **Settings** > **System** > **Developer options**, turn ON **USB debugging**.
+   - *(Oppo / ColorOS / Realme devices)*: Also turn ON **Disable permission monitoring**.
+2. Connect your phone to your PC via USB. When prompted on the phone screen, select **Always allow from this computer** and tap **Allow**.
+3. Run the automated setup script on your PC:
+   ```cmd
+   setup-android.bat
+   ```
+   The script performs the following actions:
+   - Installs `cross-clip.apk`.
+   - Grants `SYSTEM_ALERT_WINDOW` via ADB (allows background clipboard capture without drawing overlays).
+   - Grants `READ_LOGS` via ADB.
+   - Adds the application to the battery optimization exemption whitelist.
+4. Complete OEM background settings on the device (ColorOS / MIUI / HyperOS / OneUI):
+   - **Auto-launch**: Set **cross-clip** to allowed for background launch.
+   - **Battery Usage**: Set to **Unrestricted** or **Allow background activity**.
+   - **Recents Lock**: Open the app, view Recent Apps, tap the options menu on the card, and select **Lock**.
+5. Open the **cross-clip** app on your phone, enter your Relay URL and Pairing Code, and tap **Save & Connect**.
+6. Once connected, disconnect the USB cable. The physical connection is no longer needed.
 
 ---
 
-## If My Banking / UPI App Says "Risky App Detected"
+## Android Background Clipboard Architecture
 
-Some Indian banking and UPI apps (such as PhonePe, Google Pay, YONO SBI, BHIM, iMobile) run root/environment scanners. They may flag devices for:
-1. **`SYSTEM_ALERT_WINDOW` (Overlay) Permission**: Used by screen recorders or malicious overlays. Although `cross-clip` never draws any overlay, simply holding the permission can be flagged by strict scanners.
-2. **Active Developer Options / USB Debugging**: Some apps refuse to run if USB debugging is enabled in Android settings.
-3. **Sideloaded APKs**: Apps not installed directly from Google Play.
+Android 10+ restricts background processes from reading the system clipboard. `cross-clip` handles this restriction transparently without requiring accessibility services or custom keyboards:
 
-### How to Handle It (Honest Practical Advice):
-- **Option 1: One-Tap Pause (Quickest)**:
-  Swipe down your phone's notification shade. Tap the persistent **cross-clip** notification (or its **⏸ Pause** button). The service stops immediately, disconnecting network activity. Tap again to resume when done.
-- **Option 2: Use `banking-mode.bat`**:
-  Connect your phone to your PC and double-click `banking-mode.bat`:
-  - Choose **[1] Turn ON Banking Mode**: This immediately stops `cross-clip` and completely revokes `SYSTEM_ALERT_WINDOW` and `READ_LOGS` via ADB.
-  - Turn **OFF** "Developer options" in phone Settings.
-  - Open and use your banking app freely.
-  - When you want clipboard sync back: re-enable USB debugging, run `banking-mode.bat`, and choose **[2] Turn OFF Banking Mode** to restore permissions and restart sync.
-- **ADB Permission Persistence Test Result**:
-  *On the Oppo K13 5G (ColorOS), permissions granted via ADB (`SYSTEM_ALERT_WINDOW` and `READ_LOGS`) remain stored in Android's user permission tables even when USB debugging is toggled OFF.* They only reset if the app is uninstalled or if Android performs an explicit permission reset.
-- **Option 3: Last Resort**:
-  If a banking app refuses to run despite Developer options being OFF, uninstall `cross-clip` via phone Settings.
+1. A background foreground service listens for system clipboard change notifications and system clipboard log events via `READ_LOGS`.
+2. When a clipboard update event occurs outside the application, the service launches `ClipCaptureActivity`—a fully transparent, zero-frame, zero-animation activity possessing `SYSTEM_ALERT_WINDOW` permissions.
+3. The activity gains focus for under 50 milliseconds, reads the primary clipboard, passes the text to the service for encryption and transmission, and immediately invokes `finish()`.
+4. Writing incoming remote clips to the clipboard from the background is natively permitted by Android and executes directly within `SyncService`.
 
 ---
 
-## Known Platform Limitations
-- **Android 12+ System Toast**: On some Android versions, Android may display a small system toast `"cross-clip pasted from your clipboard"` when reading the clip. This is a system security notice that cannot be disabled by third-party apps.
-- **Password Manager Protection**: Sensitive clips copied from password managers (Bitwarden, 1Password) flagged with `FLAG_SENSITIVE` may be concealed by Android.
-- **Foreground Service Notification**: Android requires background services to maintain an ongoing notification. We have configured it to `IMPORTANCE_MIN` (silent, zero vibration, zero sound, zero badge) and turned it into an interactive pause/resume toggle.
+## Banking and UPI App Compatibility
+
+Certain banking and payment applications (e.g., PhonePe, Google Pay, iMobile, YONO) inspect device security states and may flag active USB debugging connections or overlay permissions:
+
+- **Active USB Connection**: Unplugging the USB cable resolves connection alerts. USB debugging may also be toggled off after initial ADB configuration; permissions remain preserved in user tables on ColorOS and standard Android distributions.
+- **One-Tap Pause**: The ongoing persistent notification allows immediate one-tap pausing and resumption without launching the application interface.
+- **Emergency Banking Switch**: The included [`banking-mode.bat`](banking-mode.bat) script provides a one-click mechanism to temporarily revoke sensitive permissions via ADB and restore them later.
 
 ---
 
-## Troubleshooting
+## Building from Source
 
-### 1. Phone to PC Not Syncing
-- Ensure `cross-clip` was granted `SYSTEM_ALERT_WINDOW`. In `MainActivity`, verify the checklist displays `✓ ADB Permissions: GRANTED`. If pending, run `setup-android.bat`.
-- Ensure ColorOS has **Auto-launch** and **Allow background activity** turned ON.
-- Verify the phone is not in **Paused** state.
+### Windows Application (.NET 8)
 
-### 2. PC to Phone Not Syncing
-- Check the Windows tray icon status. Double-click it to verify the status displays **Connected**.
-- Make sure both devices are pointing to the exact same Cloudflare Worker URL and have identical Pairing Codes.
+```bash
+cd windows
+dotnet restore
+dotnet test CrossClip.Tests/CrossClip.Tests.csproj
+dotnet publish CrossClip/CrossClip.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish/
+```
 
-### 3. Reconnection After Phone Reboot
-- `cross-clip` includes a `BootReceiver` that automatically restarts the sync service when your phone turns on.
-- If ColorOS aggressively stops the boot receiver, open `cross-clip` once after restart or lock it in Recents.
+### Android Application (Gradle)
+
+```bash
+cd android
+./gradlew testReleaseUnitTest
+./gradlew assembleRelease
+```
+
+### Server (Cloudflare Worker)
+
+```bash
+cd server
+npm install
+npm run test
+npx wrangler deploy
+```
+
+---
+
+## Known Platform Behaviors
+
+- **Android System Toast**: Android 12 and newer may display an intermittent system notification (`cross-clip pasted from your clipboard`) when the application reads clipboard content. This behavior is enforced by the operating system and cannot be modified by applications.
+- **Sensitive Clipboard Content**: Items marked with `FLAG_SENSITIVE` (such as passwords copied from specialized credential managers) may be concealed or cleared by the Android system.
+- **Reboot Permission Retention**: On select Android vendor builds, `READ_LOGS` permissions may be reset following a device restart. Running `setup-android.bat` restores the required permissions.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
