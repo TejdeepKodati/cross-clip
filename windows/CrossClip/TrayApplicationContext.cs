@@ -18,9 +18,11 @@ namespace CrossClip
         private ClipboardListener _clipboardListener;
         private SyncClient _syncClient;
         private PairingForm? _activePairingForm;
+        private readonly SynchronizationContext? _syncContext;
 
         public TrayApplicationContext()
         {
+            _syncContext = SynchronizationContext.Current;
             _settings = ConfigManager.LoadOrCreate();
             _echoGuard = new EchoLoopGuard();
 
@@ -92,14 +94,26 @@ namespace CrossClip
 
         private void OnRemoteClipReceived(string text)
         {
-            Logger.Log($"[Tray] OnRemoteClipReceived ({text.Length} chars)");
-            bool ok = ClipboardListener.SetClipboardWithRetry(text);
-            Logger.Log($"[Tray] SetClipboardWithRetry result: {ok}");
-
-            if (_settings.ShowNotifications)
+            void Apply()
             {
-                string preview = text.Length > 40 ? text.Substring(0, 40) + "..." : text;
-                _notifyIcon.ShowBalloonTip(1500, "cross-clip", $"Synced from phone: {preview}", ToolTipIcon.Info);
+                Logger.Log($"[Tray] OnRemoteClipReceived ({text.Length} chars)");
+                bool ok = ClipboardListener.SetClipboardWithRetry(text);
+                Logger.Log($"[Tray] SetClipboardWithRetry result: {ok}");
+
+                if (_settings.ShowNotifications)
+                {
+                    string preview = text.Length > 40 ? text.Substring(0, 40) + "..." : text;
+                    _notifyIcon.ShowBalloonTip(1500, "cross-clip", $"Synced from phone: {preview}", ToolTipIcon.Info);
+                }
+            }
+
+            if (_syncContext != null)
+            {
+                _syncContext.Post(_ => Apply(), null);
+            }
+            else
+            {
+                Apply();
             }
         }
 

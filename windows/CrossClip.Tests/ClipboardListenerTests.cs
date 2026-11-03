@@ -50,5 +50,19 @@ namespace CrossClip.Tests
 
             Assert.True(tcs.Task.Result);
         }
+
+        [Fact]
+        public void TestSetClipboardFromMtaThreadWorks()
+        {
+            // Verify current thread in xUnit is MTA
+            Assert.Equal(ApartmentState.MTA, Thread.CurrentThread.GetApartmentState());
+
+            string expected = "mta-test-" + Guid.NewGuid();
+            bool result = ClipboardListener.SetClipboardWithRetry(expected);
+            Assert.True(result);
+
+            string? readBack = ClipboardListener.ReadClipboardWithRetry();
+            Assert.Equal(expected, readBack);
+        }
     }
 }

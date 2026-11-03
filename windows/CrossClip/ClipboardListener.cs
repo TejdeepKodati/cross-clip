@@ -40,6 +40,19 @@ namespace CrossClip
 
         public static string? ReadClipboardWithRetry(int maxRetries = 5, int delayMs = 50)
         {
+            if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+            {
+                string? result = null;
+                var thread = new Thread(() =>
+                {
+                    result = ReadClipboardWithRetry(maxRetries, delayMs);
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                thread.Join();
+                return result;
+            }
+
             for (int i = 0; i < maxRetries; i++)
             {
                 try
@@ -54,8 +67,9 @@ namespace CrossClip
                 {
                     Thread.Sleep(delayMs);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Logger.Log($"[ClipboardListener] ReadClipboard exception: {ex.GetType().Name}: {ex.Message}");
                     break;
                 }
             }
@@ -64,6 +78,19 @@ namespace CrossClip
 
         public static bool SetClipboardWithRetry(string text, int maxRetries = 5, int delayMs = 50)
         {
+            if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+            {
+                bool result = false;
+                var thread = new Thread(() =>
+                {
+                    result = SetClipboardWithRetry(text, maxRetries, delayMs);
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                thread.Join();
+                return result;
+            }
+
             for (int i = 0; i < maxRetries; i++)
             {
                 try
@@ -71,12 +98,14 @@ namespace CrossClip
                     Clipboard.SetDataObject(text, true, 5, delayMs);
                     return true;
                 }
-                catch (ExternalException)
+                catch (ExternalException ex)
                 {
+                    Logger.Log($"[ClipboardListener] SetClipboard ExternalException retry {i + 1}: {ex.Message}");
                     Thread.Sleep(delayMs);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Logger.Log($"[ClipboardListener] SetClipboard exception: {ex.GetType().Name}: {ex.Message}");
                     break;
                 }
             }
