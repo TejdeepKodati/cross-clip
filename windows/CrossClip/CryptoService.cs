@@ -3,22 +3,37 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CrossClip
 {
     public class PlaintextClip
     {
+        [JsonPropertyName("text")]
         public string Text { get; set; } = string.Empty;
+
+        [JsonPropertyName("sender")]
         public string Sender { get; set; } = string.Empty;
+
+        [JsonPropertyName("timestamp")]
         public long Timestamp { get; set; }
+
+        [JsonPropertyName("hash")]
         public string Hash { get; set; } = string.Empty;
     }
 
     public class EncryptedEnvelope
     {
+        [JsonPropertyName("type")]
         public string Type { get; set; } = "clip";
+
+        [JsonPropertyName("nonce")]
         public string Nonce { get; set; } = string.Empty;
+
+        [JsonPropertyName("ciphertext")]
         public string Ciphertext { get; set; } = string.Empty;
+
+        [JsonPropertyName("timestamp")]
         public long Timestamp { get; set; }
     }
 
@@ -69,7 +84,8 @@ namespace CrossClip
 
             byte[] ciphertext = new byte[plaintext.Length];
             byte[] tag = new byte[16];
-            byte[] aad = BitConverter.GetBytes(timestamp);
+            byte[] aad = new byte[8];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(aad, timestamp);
 
             using (var aesGcm = new AesGcm(aesKey, 16))
             {
@@ -92,31 +108,40 @@ namespace CrossClip
 
         public static PlaintextClip? DecryptClip(EncryptedEnvelope envelope, byte[] aesKey)
         {
-            if (envelope == null || string.IsNullOrEmpty(envelope.Nonce) || string.IsNullOrEmpty(envelope.Ciphertext))
-                return null;
-
-            byte[] nonce = Convert.FromBase64String(envelope.Nonce);
-            byte[] combined = Convert.FromBase64String(envelope.Ciphertext);
-
-            if (combined.Length < 16)
-                return null;
-
-            int ciphertextLength = combined.Length - 16;
-            byte[] ciphertext = new byte[ciphertextLength];
-            byte[] tag = new byte[16];
-            Buffer.BlockCopy(combined, 0, ciphertext, 0, ciphertextLength);
-            Buffer.BlockCopy(combined, ciphertextLength, tag, 0, 16);
-
-            byte[] plaintext = new byte[ciphertextLength];
-            byte[] aad = BitConverter.GetBytes(envelope.Timestamp);
-
-            using (var aesGcm = new AesGcm(aesKey, 16))
+            try
             {
-                aesGcm.Decrypt(nonce, ciphertext, tag, plaintext, aad);
-            }
+                if (envelope == null || string.IsNullOrEmpty(envelope.Nonce) || string.IsNullOrEmpty(envelope.Ciphertext))
+                    return null;
 
-            string json = Encoding.UTF8.GetString(plaintext);
-            return JsonSerializer.Deserialize<PlaintextClip>(json);
+                byte[] nonce = Convert.FromBase64String(envelope.Nonce);
+                byte[] combined = Convert.FromBase64String(envelope.Ciphertext);
+
+                if (combined.Length < 16)
+                    return null;
+
+                int ciphertextLength = combined.Length - 16;
+                byte[] ciphertext = new byte[ciphertextLength];
+                byte[] tag = new byte[16];
+                Buffer.BlockCopy(combined, 0, ciphertext, 0, ciphertextLength);
+                Buffer.BlockCopy(combined, ciphertextLength, tag, 0, 16);
+
+                byte[] plaintext = new byte[ciphertextLength];
+                byte[] aad = new byte[8];
+                System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(aad, envelope.Timestamp);
+
+                using (var aesGcm = new AesGcm(aesKey, 16))
+                {
+                    aesGcm.Decrypt(nonce, ciphertext, tag, plaintext, aad);
+                }
+
+                string json = Encoding.UTF8.GetString(plaintext);
+                return JsonSerializer.Deserialize<PlaintextClip>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[CryptoService] Decrypt error: {ex.Message}");
+                return null;
+            }
         }
 
         public static string ComputeSha256(string input)

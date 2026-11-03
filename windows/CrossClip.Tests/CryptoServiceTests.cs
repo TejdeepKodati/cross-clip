@@ -85,10 +85,8 @@ namespace CrossClip.Tests
 
             var envelope = CryptoService.EncryptClip("Secret text", "windows", key1);
 
-            Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(() =>
-            {
-                CryptoService.DecryptClip(envelope, key2);
-            });
+            var result = CryptoService.DecryptClip(envelope, key2);
+            Assert.Null(result);
         }
     }
 }

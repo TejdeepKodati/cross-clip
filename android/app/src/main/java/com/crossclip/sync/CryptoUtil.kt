@@ -80,13 +80,19 @@ object CryptoUtil {
             val plaintext = cipher.doFinal(combined)
 
             val json = JSONObject(String(plaintext, Charsets.UTF_8))
+            val text = if (json.has("text")) json.optString("text") else json.optString("Text")
+            val sender = if (json.has("sender")) json.optString("sender") else json.optString("Sender")
+            val timestampVal = if (json.has("timestamp")) json.optLong("timestamp") else json.optLong("Timestamp", timestamp)
+            val hashVal = if (json.has("hash")) json.optString("hash") else json.optString("Hash")
+
             PlaintextClip(
-                text = json.optString("text"),
-                sender = json.optString("sender"),
-                timestamp = json.optLong("timestamp"),
-                hash = json.optString("hash")
+                text = text,
+                sender = sender,
+                timestamp = timestampVal,
+                hash = hashVal
             )
         } catch (e: Exception) {
+            android.util.Log.e("CrossClip", "CryptoUtil.decrypt failed: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }

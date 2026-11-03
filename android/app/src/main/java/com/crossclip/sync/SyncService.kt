@@ -93,6 +93,15 @@ class SyncService : Service() {
             return START_STICKY
         }
 
+        val newSecret = intent?.getStringExtra("secret")
+        val newServer = intent?.getStringExtra("server_url")
+        if (!newSecret.isNullOrEmpty() || !newServer.isNullOrEmpty()) {
+            val p = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            if (!newSecret.isNullOrEmpty()) p.putString(KEY_SECRET, newSecret)
+            if (!newServer.isNullOrEmpty()) p.putString(KEY_SERVER_URL, newServer)
+            p.apply()
+        }
+
         loadAndConnect()
         return START_STICKY
     }
