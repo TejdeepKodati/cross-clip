@@ -1,0 +1,12 @@
+<resources>
+    <color name="primary">#107C41</color>
+    <color name="primary_dark">#0B5C30</color>
+    <color name="accent">#28A745</color>
+    <color name="background">#F8F9FA</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="text_main">#212529</color>
+    <color name="text_muted">#6C757D</color>
+    <color name="status_connected">#28A745</color>
+    <color name="status_paused">#FFC107</color>
+    <color name="status_disconnected">#DC3545</color>
+</resources>

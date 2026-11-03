@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">cross-clip</string>
+    <string name="channel_name">cross-clip Background Sync</string>
+    <string name="channel_desc">Maintains secure clipboard synchronization</string>
+    <string name="capture_channel_name">cross-clip Sync Events</string>
+</resources>
