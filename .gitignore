@@ -24,3 +24,6 @@ tools/
 *.log
 .env
 .env.local
+
+publish/
+windows/publish/
