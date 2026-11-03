@@ -65,6 +65,7 @@ jobs:
         run: chmod +x android/gradlew
 
       - name: Generate Self-Signed Release Keystore
+        if: "!hashFiles('android/app/release.keystore')"
         run: |
           keytool -genkeypair -v \
             -keystore android/app/release.keystore \
