@@ -72,20 +72,29 @@ namespace CrossClip
             _syncClient.StateChanged += OnConnectionStateChanged;
             _syncClient.RemoteClipReceived += OnRemoteClipReceived;
 
+            Logger.Log($"[Tray] TrayApplicationContext initialized. Room: {_syncClient.RoomId}");
             _syncClient.Start();
         }
 
         private void OnLocalClipboardChanged(string text)
         {
+            Logger.Log($"[Tray] OnLocalClipboardChanged ({text.Length} chars)");
             if (_echoGuard.ShouldProcessLocalCopy(text, out _))
             {
+                Logger.Log("[Tray] EchoGuard approved copy. Sending to relay...");
                 _ = _syncClient.SendLocalClipAsync(text);
+            }
+            else
+            {
+                Logger.Log("[Tray] EchoGuard suppressed copy (duplicate/echo).");
             }
         }
 
         private void OnRemoteClipReceived(string text)
         {
-            ClipboardListener.SetClipboardWithRetry(text);
+            Logger.Log($"[Tray] OnRemoteClipReceived ({text.Length} chars)");
+            bool ok = ClipboardListener.SetClipboardWithRetry(text);
+            Logger.Log($"[Tray] SetClipboardWithRetry result: {ok}");
 
             if (_settings.ShowNotifications)
             {
@@ -96,6 +105,7 @@ namespace CrossClip
 
         private void OnConnectionStateChanged(ConnectionState state)
         {
+            Logger.Log($"[Tray] ConnectionStateChanged: {state}");
             string text = state switch
             {
                 ConnectionState.Connected => "Connected",

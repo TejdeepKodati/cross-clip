@@ -74,9 +74,9 @@ namespace CrossClip
                 try
                 {
                     State = ConnectionState.Connecting;
-                    Log("Connecting to relay...");
-
                     string wsUrl = BuildWebSocketUrl(_serverBaseUrl, _roomId);
+                    Log($"Connecting to relay at {wsUrl}...");
+
                     using var ws = new ClientWebSocket();
                     _ws = ws;
 
@@ -139,7 +139,12 @@ namespace CrossClip
                     result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", ct);
+                        Log("Server sent close frame.");
+                        try
+                        {
+                            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", ct);
+                        }
+                        catch { }
                         return;
                     }
                     ms.Write(buffer, 0, result.Count);
@@ -171,12 +176,20 @@ namespace CrossClip
                     if (clip == null) return;
 
                     // Suppress our own echoes if sender is windows
-                    if (clip.Sender == "windows") return;
+                    if (clip.Sender == "windows")
+                    {
+                        Log("Suppressed echo of our own clip.");
+                        return;
+                    }
 
                     if (_echoGuard.ShouldApplyRemoteClip(clip.Hash))
                     {
                         Log($"Received clip from {clip.Sender} ({clip.Text.Length} chars)");
                         RemoteClipReceived?.Invoke(clip.Text);
+                    }
+                    else
+                    {
+                        Log("Suppressed duplicate remote clip (already applied).");
                     }
                 }
             }
@@ -214,7 +227,11 @@ namespace CrossClip
         public async Task SendLocalClipAsync(string text)
         {
             var ws = _ws;
-            if (ws == null || ws.State != WebSocketState.Open) return;
+            if (ws == null || ws.State != WebSocketState.Open)
+            {
+                Log($"Cannot send clip ({text.Length} chars): WebSocket is {ws?.State.ToString() ?? "null"}");
+                return;
+            }
 
             try
             {
@@ -229,7 +246,7 @@ namespace CrossClip
                 }
 
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
-                Log($"Sent clip to phone ({text.Length} chars)");
+                Log($"Sent clip to relay ({text.Length} chars)");
             }
             catch (Exception ex)
             {
@@ -258,6 +275,7 @@ namespace CrossClip
 
         private void Log(string msg)
         {
+            Logger.Log($"[SyncClient] {msg}");
             LogMessage?.Invoke($"[{DateTime.Now:HH:mm:ss}] {msg}");
         }
 

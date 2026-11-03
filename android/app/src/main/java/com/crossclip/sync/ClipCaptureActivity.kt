@@ -10,6 +10,8 @@ import android.util.Log
 
 class ClipCaptureActivity : Activity() {
 
+    private var hasCaptured = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setBackgroundDrawableResource(android.R.color.transparent)
@@ -17,19 +19,20 @@ class ClipCaptureActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
+        if (hasFocus && !hasCaptured) {
+            hasCaptured = true
             readAndFinish()
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // Safety fallback if focus callback was already delivered
         Handler(Looper.getMainLooper()).postDelayed({
-            if (!isFinishing) {
+            if (!hasCaptured && !isFinishing) {
+                hasCaptured = true
                 readAndFinish()
             }
-        }, 100)
+        }, 50)
     }
 
     private fun readAndFinish() {
@@ -39,6 +42,7 @@ class ClipCaptureActivity : Activity() {
             if (clip != null && clip.itemCount > 0) {
                 val text = clip.getItemAt(0)?.coerceToText(this)?.toString()
                 if (!text.isNullOrEmpty()) {
+                    Log.d("CrossClip", "ClipCaptureActivity read: ${text.take(20)}...")
                     SyncService.instance?.sendLocalClip(text)
                 }
             }

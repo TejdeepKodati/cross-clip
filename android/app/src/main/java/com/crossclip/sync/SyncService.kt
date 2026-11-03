@@ -22,12 +22,15 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
 class SyncService : Service() {
 
     companion object {
         var instance: SyncService? = null
+        const val TAG = "CrossClip"
         const val PREFS_NAME = "cross_clip_prefs"
         const val KEY_SERVER_URL = "server_url"
         const val KEY_SECRET = "master_secret"
@@ -44,15 +47,21 @@ class SyncService : Service() {
 
     private var client: OkHttpClient? = null
     private var webSocket: WebSocket? = null
+    private val socketLock = Any()
+
     private var aesKey: ByteArray? = null
     private var roomId: String? = null
     private var lastKnownHash: String = ""
     private var isPaused = false
     private var showToasts = false
+    private var lastCaptureLaunchTime: Long = 0
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var reconnectRunnable: Runnable? = null
     private var reconnectAttempt = 0
+
+    private var logcatProcess: Process? = null
+    private var logcatThread: Thread? = null
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         if (!isPaused) {
@@ -74,6 +83,7 @@ class SyncService : Service() {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.addPrimaryClipChangedListener(clipListener)
 
+        startLogcatWatcher()
         loadAndConnect()
     }
 
@@ -83,7 +93,6 @@ class SyncService : Service() {
             return START_STICKY
         }
 
-        // Reload configuration if started with new params
         loadAndConnect()
         return START_STICKY
     }
@@ -102,11 +111,13 @@ class SyncService : Service() {
 
         if (isPaused) {
             disconnectWebSocket()
-            Log.d("CrossClip", "Sync paused. WebSocket disconnected.")
+            stopLogcatWatcher()
+            Log.d(TAG, "Sync paused. WebSocket disconnected.")
         } else {
             reconnectAttempt = 0
+            startLogcatWatcher()
             connectWebSocket()
-            Log.d("CrossClip", "Sync resumed. Connecting WebSocket.")
+            Log.d(TAG, "Sync resumed. Connecting WebSocket.")
         }
     }
 
@@ -132,56 +143,92 @@ class SyncService : Service() {
                 connectWebSocket()
             }
         } catch (e: Exception) {
-            Log.e("CrossClip", "Error initializing keys", e)
+            Log.e(TAG, "Error initializing keys", e)
         }
     }
 
     private fun connectWebSocket() {
-        if (isPaused) return
-        val currentRoom = roomId ?: return
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        var serverUrl = prefs.getString(KEY_SERVER_URL, "")?.trim()?.trimEnd('/') ?: return
+        synchronized(socketLock) {
+            if (isPaused) return
+            val currentRoom = roomId ?: return
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            var serverUrl = prefs.getString(KEY_SERVER_URL, "")?.trim()?.trimEnd('/') ?: return
 
-        if (serverUrl.startsWith("http://", ignoreCase = true)) {
-            serverUrl = "ws://" + serverUrl.substring(7)
-        } else if (serverUrl.startsWith("https://", ignoreCase = true)) {
-            serverUrl = "wss://" + serverUrl.substring(8)
-        } else if (!serverUrl.startsWith("ws://", ignoreCase = true) && !serverUrl.startsWith("wss://", ignoreCase = true)) {
-            serverUrl = "wss://$serverUrl"
+            if (serverUrl.startsWith("http://", ignoreCase = true)) {
+                serverUrl = "ws://" + serverUrl.substring(7)
+            } else if (serverUrl.startsWith("https://", ignoreCase = true)) {
+                serverUrl = "wss://" + serverUrl.substring(8)
+            } else if (!serverUrl.startsWith("ws://", ignoreCase = true) && !serverUrl.startsWith("wss://", ignoreCase = true)) {
+                serverUrl = "wss://$serverUrl"
+            }
+
+            val fullUrl = "$serverUrl/ws/$currentRoom"
+
+            // Cancel any pending reconnect tasks
+            reconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+
+            // Gracefully close any existing active socket
+            val oldWs = webSocket
+            webSocket = null
+            if (oldWs != null) {
+                try {
+                    oldWs.close(1000, "Normal cleanup")
+                } catch (_: Exception) {}
+            }
+
+            if (client == null) {
+                client = OkHttpClient.Builder()
+                    .pingInterval(30, TimeUnit.SECONDS)
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(0, TimeUnit.MILLISECONDS)
+                    .build()
+            }
+
+            val request = Request.Builder().url(fullUrl).build()
+
+            val newWs = client!!.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(ws: WebSocket, response: Response) {
+                    synchronized(socketLock) {
+                        if (webSocket !== ws) {
+                            ws.close(1000, "Obsolete")
+                            return
+                        }
+                    }
+                    Log.d(TAG, "WebSocket connected to room: $currentRoom")
+                    reconnectAttempt = 0
+                    MainActivity.instance?.updateUi()
+                }
+
+                override fun onMessage(ws: WebSocket, text: String) {
+                    synchronized(socketLock) {
+                        if (webSocket !== ws) return
+                    }
+                    onIncomingMessage(text)
+                }
+
+                override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                    synchronized(socketLock) {
+                        if (webSocket !== ws) return
+                        webSocket = null
+                    }
+                    Log.w(TAG, "WebSocket connection failure: ${t.javaClass.simpleName}: ${t.message}")
+                    scheduleReconnect()
+                }
+
+                override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                    synchronized(socketLock) {
+                        if (webSocket !== ws) return
+                        webSocket = null
+                    }
+                    Log.d(TAG, "WebSocket closed: $code / $reason")
+                    if (code != 1000 && !isPaused) {
+                        scheduleReconnect()
+                    }
+                }
+            })
+
+            webSocket = newWs
         }
-
-        val fullUrl = "$serverUrl/ws/$currentRoom"
-        disconnectWebSocket()
-
-        client = OkHttpClient.Builder()
-            .pingInterval(30, TimeUnit.SECONDS)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.MILLISECONDS)
-            .build()
-
-        val request = Request.Builder().url(fullUrl).build()
-
-        webSocket = client?.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(ws: WebSocket, response: Response) {
-                Log.d("CrossClip", "WebSocket connected to room: $currentRoom")
-                reconnectAttempt = 0
-                MainActivity.instance?.updateUi()
-            }
-
-            override fun onMessage(ws: WebSocket, text: String) {
-                onIncomingMessage(text)
-            }
-
-            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                Log.w("CrossClip", "WebSocket connection failure: ${t.message}")
-                scheduleReconnect()
-            }
-
-            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                Log.d("CrossClip", "WebSocket closed: $code / $reason")
-                scheduleReconnect()
-            }
-        })
     }
 
     private fun scheduleReconnect() {
@@ -190,7 +237,7 @@ class SyncService : Service() {
 
         reconnectAttempt++
         val delaySec = minOf(30, (1 shl minOf(reconnectAttempt, 5)))
-        Log.d("CrossClip", "Scheduling reconnect in ${delaySec}s (attempt $reconnectAttempt)")
+        Log.d(TAG, "Scheduling reconnect in ${delaySec}s (attempt $reconnectAttempt)")
 
         reconnectRunnable = Runnable {
             if (!isPaused) {
@@ -202,11 +249,16 @@ class SyncService : Service() {
     }
 
     private fun disconnectWebSocket() {
-        reconnectRunnable?.let { mainHandler.removeCallbacks(it) }
-        try {
-            webSocket?.close(1000, "Service disconnect")
-        } catch (_: Exception) {}
-        webSocket = null
+        synchronized(socketLock) {
+            reconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+            val ws = webSocket
+            webSocket = null
+            if (ws != null) {
+                try {
+                    ws.close(1000, "Service disconnect")
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     private fun onIncomingMessage(jsonStr: String) {
@@ -227,29 +279,31 @@ class SyncService : Service() {
                 if (clip.sender == "android") return // Ignore our own clips
 
                 if (clip.hash.isNotEmpty() && clip.hash != lastKnownHash) {
-                    lastKnownHash = clip.hash
                     mainHandler.post {
-                        writeToSystemClipboard(clip.text)
+                        writeToSystemClipboard(clip.text, clip.hash)
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e("CrossClip", "Error parsing incoming clip", e)
+            Log.e(TAG, "Error parsing incoming clip", e)
         }
     }
 
-    private fun writeToSystemClipboard(text: String) {
+    private fun writeToSystemClipboard(text: String, hash: String) {
         try {
+            // Update lastKnownHash BEFORE setting system clipboard so our own listener suppresses it
+            lastKnownHash = hash
+
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("cross-clip", text))
-            Log.d("CrossClip", "Updated phone clipboard from PC: ${text.take(20)}...")
+            Log.d(TAG, "Updated phone clipboard from PC: ${text.take(20)}...")
 
             if (showToasts) {
                 val preview = if (text.length > 30) text.take(30) + "..." else text
                 Toast.makeText(this, "Clipboard synced: $preview", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Log.e("CrossClip", "Error setting phone clipboard", e)
+            Log.e(TAG, "Error setting phone clipboard", e)
         }
     }
 
@@ -258,33 +312,49 @@ class SyncService : Service() {
         val key = aesKey ?: return
 
         val hash = CryptoUtil.sha256(text)
-        if (hash == lastKnownHash) return
+        if (hash == lastKnownHash) {
+            Log.d(TAG, "Suppressed sending duplicate/echo clip: ${text.take(15)}...")
+            return
+        }
         lastKnownHash = hash
 
         Thread {
             try {
                 val envelopeJson = CryptoUtil.encrypt(text, "android", key)
-                val sent = webSocket?.send(envelopeJson) ?: false
-                if (sent) {
-                    Log.d("CrossClip", "Sent clip to PC: ${text.take(20)}...")
+                val ws = webSocket
+                if (ws != null) {
+                    val sent = ws.send(envelopeJson)
+                    Log.d(TAG, "Sent clip to PC (${text.length} chars, sent=$sent)")
+                } else {
+                    Log.w(TAG, "Cannot send clip: WebSocket is null")
                 }
             } catch (e: Exception) {
-                Log.e("CrossClip", "Failed to send local clip", e)
+                Log.e(TAG, "Failed to send local clip", e)
             }
         }.start()
     }
 
-    private fun launchCaptureActivity() {
+    fun launchCaptureActivity() {
+        if (isPaused) return
+        val now = System.currentTimeMillis()
+        if (now - lastCaptureLaunchTime < 350) return // Debounce 350ms
+        lastCaptureLaunchTime = now
+
         val captureIntent = Intent(this, ClipCaptureActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_NO_ANIMATION or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
         // Direct startActivity launch
         try {
             startActivity(captureIntent)
-        } catch (_: Exception) {}
+            return
+        } catch (e: Exception) {
+            Log.d(TAG, "Direct startActivity failed, trying notification fallback: ${e.message}")
+        }
 
-        // Fallback: fullScreenIntent notification to bypass ColorOS background restrictions
+        // Fallback: fullScreenIntent notification to bypass background start restrictions
         try {
             val fullScreenPendingIntent = PendingIntent.getActivity(
                 this,
@@ -307,14 +377,65 @@ class SyncService : Service() {
             val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notifManager.notify(CAPTURE_NOTIF_ID, notification)
             mainHandler.postDelayed({ notifManager.cancel(CAPTURE_NOTIF_ID) }, 400)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch ClipCaptureActivity", e)
+        }
+    }
+
+    private fun startLogcatWatcher() {
+        stopLogcatWatcher()
+        logcatThread = Thread({
+            try {
+                // Clear existing logcat buffer first so we only process new events
+                try {
+                    Runtime.getRuntime().exec("logcat -c").waitFor()
+                } catch (_: Exception) {}
+
+                val process = Runtime.getRuntime().exec(arrayOf("logcat", "-v", "brief", "-b", "system", "-b", "main"))
+                logcatProcess = process
+                val reader = BufferedReader(InputStreamReader(process.inputStream))
+                var line: String? = null
+
+                Log.d(TAG, "LogcatWatcher active and streaming logs.")
+
+                while (!Thread.currentThread().isInterrupted && reader.readLine().also { line = it } != null) {
+                    val l = line ?: continue
+                    if (isPaused) continue
+
+                    // Ignore log lines from our own app
+                    if (l.contains("com.crossclip.sync") || l.contains("CrossClip")) continue
+
+                    val lower = l.lowercase()
+                    // Match clipboard change log events
+                    if (lower.contains("clipboard") || lower.contains("primaryclip") || lower.contains("denying clipboard access")) {
+                        Log.d(TAG, "LogcatWatcher clipboard event: $l")
+                        mainHandler.post {
+                            launchCaptureActivity()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "LogcatWatcher ended: ${e.message}")
+            }
+        }, "CrossClip-LogcatWatcher").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun stopLogcatWatcher() {
+        try {
+            logcatThread?.interrupt()
+            logcatProcess?.destroy()
         } catch (_: Exception) {}
+        logcatProcess = null
+        logcatThread = null
     }
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-            // Minimal importance persistent notification
             val statusChannel = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.channel_name),
@@ -328,7 +449,6 @@ class SyncService : Service() {
             }
             manager.createNotificationChannel(statusChannel)
 
-            // Capture channel for fullScreenIntent
             val captureChannel = NotificationChannel(
                 CAPTURE_CHANNEL_ID,
                 getString(R.string.capture_channel_name),
@@ -367,7 +487,7 @@ class SyncService : Service() {
             .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
-            .setContentIntent(pToggle) // Entire notification body toggles pause/resume!
+            .setContentIntent(pToggle)
             .addAction(android.R.drawable.ic_media_pause, actionText, pToggle)
             .build()
     }
@@ -376,6 +496,7 @@ class SyncService : Service() {
         super.onDestroy()
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.removePrimaryClipChangedListener(clipListener)
+        stopLogcatWatcher()
         disconnectWebSocket()
         instance = null
     }

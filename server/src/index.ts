@@ -19,6 +19,15 @@ export class ClipboardRoom extends DurableObject {
         updated_at INTEGER NOT NULL
       )
     `);
+
+    // Auto-respond to heartbeat pings at the edge without waking the Durable Object
+    try {
+      this.ctx.setWebSocketAutoResponse(
+        new WebSocketRequestResponsePair(JSON.stringify({ type: "ping" }), JSON.stringify({ type: "pong" }))
+      );
+    } catch {
+      // Fallback handled in webSocketMessage
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -102,11 +111,17 @@ export class ClipboardRoom extends DurableObject {
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
-    // Hibernation event callback - connection is already closing/closed.
+    try {
+      ws.close(code, reason);
+    } catch {
+      // Ignore if already closed
+    }
   }
 
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
-    // Hibernation error callback.
+    try {
+      ws.close(1011, "WebSocket error");
+    } catch {}
   }
 }
 

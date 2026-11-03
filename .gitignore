@@ -27,3 +27,5 @@ tools/
 
 publish/
 windows/publish/
+
+*.exe

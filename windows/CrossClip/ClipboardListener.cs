@@ -24,11 +24,13 @@ namespace CrossClip
         public ClipboardListener()
         {
             _window = new MessageOnlyWindow(this);
-            AddClipboardFormatListener(_window.Handle);
+            bool ok = AddClipboardFormatListener(_window.Handle);
+            Logger.Log($"[ClipboardListener] Registered on HWND {_window.Handle}: {ok} (err: {Marshal.GetLastWin32Error()})");
         }
 
         private void OnClipboardUpdate()
         {
+            Logger.Log("[ClipboardListener] WM_CLIPBOARDUPDATE received");
             string? text = ReadClipboardWithRetry();
             if (!string.IsNullOrEmpty(text))
             {
