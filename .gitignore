@@ -1,0 +1,26 @@
+# Dependencies and builds
+node_modules/
+.wrangler/
+dist/
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+.idea/
+*.iml
+
+# Local tools and configs
+tools/
+*.log
+.env
+.env.local
